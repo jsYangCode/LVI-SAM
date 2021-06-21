@@ -333,9 +333,15 @@ public:
 
         return false;
     }
-
+/*
+    1. 使用优化后的激光里程计，进行imu数值的递推
+    2. 根据lidar与imu的外参，转换成lidar的里程计
+    3. 保存前帧的bias 到 covariance字段
+    4. 发布odometry，imu Path， TF(odom->base_link)
+*/
     void imuHandler(const sensor_msgs::Imu::ConstPtr& imuMsg)
     {
+        //这个参数不是表示lidar系到imu系的转换吗？？？
         sensor_msgs::Imu thisImu = imuConverter(*imuMsg);
         // publish static tf
         tfMap2Odom.sendTransform(tf::StampedTransform(map_to_odom, thisImu.header.stamp, "map", "odom"));
@@ -403,6 +409,7 @@ public:
             pose_stamped.header.frame_id = "odom";
             pose_stamped.pose = odometry.pose.pose;
             imuPath.poses.push_back(pose_stamped);
+
             while(!imuPath.poses.empty() && abs(imuPath.poses.front().header.stamp.toSec() - imuPath.poses.back().header.stamp.toSec()) > 3.0)
                 imuPath.poses.erase(imuPath.poses.begin());
             if (pubImuPath.getNumSubscribers() != 0)
