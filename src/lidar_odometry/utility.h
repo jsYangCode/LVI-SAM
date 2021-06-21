@@ -214,6 +214,7 @@ public:
 
     sensor_msgs::Imu imuConverter(const sensor_msgs::Imu& imu_in)
     {
+        //这里为什么这样变换？  
         sensor_msgs::Imu imu_out = imu_in;
         // rotate acceleration
         Eigen::Vector3d acc(imu_in.linear_acceleration.x, imu_in.linear_acceleration.y, imu_in.linear_acceleration.z);
