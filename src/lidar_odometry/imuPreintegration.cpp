@@ -121,15 +121,30 @@ public:
         doneFirstOpt = false;
         systemInitialized = false;
     }
-
+/*
+    1. 获取激光里程计
+    2. 判断是否位姿态跳变
+    3. 初始化因子图系统，  计算imu的世界位姿， 添加pose velocity bias因子以及相应的先验值到因子图
+    4. 因子图优化，系统初始化完成，key=1
+    5.      当key=100 时，重置因子图，重新添加因子以及先验值
+    6.      进行因子图优化，key=1
+    7. 根据优化的结果，对imu数据进行积分
+    8. 获取imu预积分值与系统状态，构建imu因子
+    9. 添加系统先验值
+    10.进行优化
+    11.获取优化的值到prev中
+    12.异常检测
+    13.根据优化后的值，重新进行imu积分递推
+*/
     void odometryHandler(const nav_msgs::Odometry::ConstPtr& odomMsg)
     {
         double currentCorrectionTime = ROS_TIME(odomMsg);
 
+/*
         // make sure we have imu data to integrate
         if (imuQueOpt.empty())
             return;
-
+        //获取激光里程计位姿
         float p_x = odomMsg->pose.pose.position.x;
         float p_y = odomMsg->pose.pose.position.y;
         float p_z = odomMsg->pose.pose.position.z;
@@ -165,8 +180,9 @@ public:
                 else
                     break;
             }
-            // initial pose
+            // initial pose 初始化imu的位姿
             prevPose_ = lidarPose.compose(lidar2Imu);
+
             gtsam::PriorFactor<gtsam::Pose3> priorPose(X(0), prevPose_, priorPoseNoise);
             graphFactors.add(priorPose);
             // initial velocity
@@ -225,7 +241,6 @@ public:
             key = 1;
         }
 
-
         // 1. integrate imu data and optimize
         while (!imuQueOpt.empty())
         {
@@ -245,8 +260,10 @@ public:
             else
                 break;
         }
+*/
         // add imu factor to graph
         const gtsam::PreintegratedImuMeasurements& preint_imu = dynamic_cast<const gtsam::PreintegratedImuMeasurements&>(*imuIntegratorOpt_);
+
         gtsam::ImuFactor imu_factor(X(key - 1), V(key - 1), X(key), V(key), B(key - 1), preint_imu);
         graphFactors.add(imu_factor);
         // add imu bias between factor
@@ -271,10 +288,11 @@ public:
         prevPose_  = result.at<gtsam::Pose3>(X(key));
         prevVel_   = result.at<gtsam::Vector3>(V(key));
         prevState_ = gtsam::NavState(prevPose_, prevVel_);
-        prevBias_  = result.at<gtsam::imuBias::ConstantBias>(B(key));
+        prevBias_  = result.at<gtsam::imuBias:: >(B(key));
         // Reset the optimization preintegration object.
         imuIntegratorOpt_->resetIntegrationAndSetBias(prevBias_);
         // check optimization
+        //检测速度出现较大的值，以及bias出现较大的值时进行参数重置。
         if (failureDetection(prevVel_, prevBias_))
         {
             resetParams();
@@ -333,10 +351,11 @@ public:
 
         return false;
     }
+
 /*
-    1. 使用优化后的激光里程计，进行imu数值的递推
+    1. 使用优化后的激光里程计，进行imu数值的积分递推
     2. 根据lidar与imu的外参，转换成lidar的里程计
-    3. 保存前帧的bias 到 covariance字段
+    3. 保存前帧的bias 到 covariance字段(用于VINS快速初始化)
     4. 发布odometry，imu Path， TF(odom->base_link)
 */
     void imuHandler(const sensor_msgs::Imu::ConstPtr& imuMsg)
