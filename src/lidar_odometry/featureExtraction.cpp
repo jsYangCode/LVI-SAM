@@ -77,7 +77,11 @@ public:
 
         publishFeatureCloud();
     }
-
+/*
+    1. 遍历所有点，取出深度值
+    2. 计算C值
+    3. 初始化标志位，smoothness
+*/
     void calculateSmoothness()
     {
         int cloudSize = extractedCloud->points.size();
@@ -100,10 +104,16 @@ public:
         }
     }
 
+/*  
+    1. 遍历所有点，如果在扇形范围内
+    2. 如果满足阈值，cloudNeighborPicked赋值1(遮挡点)
+    3. 如果相邻三点距离满足阈值，cloudNeighborPicked赋值1(平行)
+*/
     void markOccludedPoints()
     {
         int cloudSize = extractedCloud->points.size();
         // mark occluded points and parallel beam points
+
         for (int i = 5; i < cloudSize - 6; ++i)
         {
             // occluded points
@@ -137,7 +147,13 @@ public:
                 cloudNeighborPicked[i] = 1;
         }
     }
-
+/*  
+    1. 遍历所有的线束，求解sp ep
+    2. 对cloudSmoothness进行排序
+    3. 局部范围内进行角点选择，且屏蔽临近10个点
+    4. 局部范围内进行平面点选择，且屏蔽临近10个点
+    5. 将所有平面点叠加起来
+*/
     void extractFeatures()
     {
         cornerCloud->clear();
@@ -158,13 +174,14 @@ public:
 
                 if (sp >= ep)
                     continue;
-
+                //排序
                 std::sort(cloudSmoothness.begin()+sp, cloudSmoothness.begin()+ep, by_value());
 
                 int largestPickedNum = 0;
                 for (int k = ep; k >= sp; k--)
                 {
                     int ind = cloudSmoothness[k].ind;
+                    //不是瑕点 且 大于边阈值
                     if (cloudNeighborPicked[ind] == 0 && cloudCurvature[ind] > edgeThreshold)
                     {
                         largestPickedNum++;

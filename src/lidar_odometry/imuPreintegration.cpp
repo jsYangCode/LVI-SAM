@@ -74,7 +74,10 @@ public:
     gtsam::Pose3 imu2Lidar = gtsam::Pose3(gtsam::Rot3(1, 0, 0, 0), gtsam::Point3(-extTrans.x(), -extTrans.y(), -extTrans.z()));
     gtsam::Pose3 lidar2Imu = gtsam::Pose3(gtsam::Rot3(1, 0, 0, 0), gtsam::Point3(extTrans.x(), extTrans.y(), extTrans.z()));;
 
-
+/*  
+    1. 订阅imu 优化后的lidar里程计 
+    2. 发布imu预计分odom(预测值)
+*/
     IMUPreintegration()
     {
         subImu      = nh.subscribe<sensor_msgs::Imu>  (imuTopic, 2000, &IMUPreintegration::imuHandler, this, ros::TransportHints().tcpNoDelay());
@@ -140,7 +143,7 @@ public:
     {
         double currentCorrectionTime = ROS_TIME(odomMsg);
 
-/*
+
         // make sure we have imu data to integrate
         if (imuQueOpt.empty())
             return;
@@ -260,7 +263,7 @@ public:
             else
                 break;
         }
-*/
+
         // add imu factor to graph
         const gtsam::PreintegratedImuMeasurements& preint_imu = dynamic_cast<const gtsam::PreintegratedImuMeasurements&>(*imuIntegratorOpt_);
 

@@ -84,7 +84,10 @@ private:
     double timeScanNext;
     std_msgs::Header cloudHeader;
 
-
+/*  
+    1. 订阅imu VO 点云
+    2. 发布去畸变的点云， 点云信息 
+*/
 public:
     ImageProjection():
     deskewFlag(0)
@@ -110,7 +113,7 @@ public:
 
         fullCloud->points.resize(N_SCAN*Horizon_SCAN);
 
-        cloudInfo.startRingIndex.assign(N_SCAN, 0);
+        cloudInfo.startRingIndex.assign(N_SCAN, 0);//scan内的起始index
         cloudInfo.endRingIndex.assign(N_SCAN, 0);
 
         cloudInfo.pointColInd.assign(N_SCAN*Horizon_SCAN, 0);
@@ -155,10 +158,11 @@ public:
     }
 
     void cloudHandler(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg)
-    {
+    {   
+        //查找相应点云的ring、time字段
         if (!cachePointCloud(laserCloudMsg))
             return;
-
+        
         if (!deskewInfo())
             return;
 
@@ -170,12 +174,15 @@ public:
 
         resetParameters();
     }
-
+/*  
+    1. 点云入队， 头帧出队，记录时间
+    2. 查找帧的ring、time字段，设置相应flag
+*/
     bool cachePointCloud(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg)
     {
         // cache point cloud
-        cloudQueue.push_back(*laserCloudMsg);
-
+        cloudQueue.push_back(*laserCloudMsg);//将点云入队
+        //头帧出队，记录时间
         if (cloudQueue.size() <= 2)
             return false;
         else
@@ -199,6 +206,7 @@ public:
         }
 
         // check ring channel
+        // 查找该帧的ring字段
         static int ringFlag = 0;
         if (ringFlag == 0)
         {
@@ -219,6 +227,7 @@ public:
         }     
 
         // check point time
+        // 查找该帧的time字段
         if (deskewFlag == 0)
         {
             deskewFlag = -1;
@@ -255,11 +264,16 @@ public:
 
         return true;
     }
-
+/*
+    1. 找到当前帧临近的imu数据
+    2. 取出imu的姿态数据，加入cloudInfo
+    3. 根据imu的瞬时速度,计算帧间imu数据的相对位姿
+    4. cloudInfo=true
+*/
     void imuDeskewInfo()
     {
         cloudInfo.imuAvailable = false;
-
+        //找到目前帧最近的imu数据，将历史imu弹出
         while (!imuQueue.empty())
         {
             if (imuQueue.front().header.stamp.toSec() < timeScanCur - 0.01)
@@ -272,20 +286,22 @@ public:
             return;
 
         imuPointerCur = 0;
-
+        //如果临近帧还有imu数据
         for (int i = 0; i < (int)imuQueue.size(); ++i)
         {
             sensor_msgs::Imu thisImuMsg = imuQueue[i];
             double currentImuTime = thisImuMsg.header.stamp.toSec();
 
             // get roll, pitch, and yaw estimation for this scan
+            //九轴imu获取当前帧姿态，作为初始姿态
             if (currentImuTime <= timeScanCur)
                 imuRPY2rosRPY(&thisImuMsg, &cloudInfo.imuRollInit, &cloudInfo.imuPitchInit, &cloudInfo.imuYawInit);
 
             if (currentImuTime > timeScanNext + 0.01)
                 break;
-
-            if (imuPointerCur == 0){
+            //每帧点云起始时刻姿态为零
+            if (imuPointerCur == 0)
+            {
                 imuRotX[0] = 0;
                 imuRotY[0] = 0;
                 imuRotZ[0] = 0;
@@ -299,6 +315,7 @@ public:
             imuAngular2rosAngular(&thisImuMsg, &angular_x, &angular_y, &angular_z);
 
             // integrate rotation
+            //根据imu的瞬时角速度计算 队列中的imu相对姿态
             double timeDiff = currentImuTime - imuTime[imuPointerCur-1];
             imuRotX[imuPointerCur] = imuRotX[imuPointerCur-1] + angular_x * timeDiff;
             imuRotY[imuPointerCur] = imuRotY[imuPointerCur-1] + angular_y * timeDiff;
@@ -314,7 +331,12 @@ public:
 
         cloudInfo.imuAvailable = true;
     }
-
+/*
+    1. 找到当前帧临近的VO值
+    2. 将临近的VO值赋值
+    3. 找到帧起始、结束时刻的odom
+    4. 计算帧间的六自由度增量
+*/
     void odomDeskewInfo()
     {
         cloudInfo.odomAvailable = false;
@@ -335,7 +357,7 @@ public:
 
         // get start odometry at the beinning of the scan
         nav_msgs::Odometry startOdomMsg;
-
+        //找到初始odom
         for (int i = 0; i < (int)odomQueue.size(); ++i)
         {
             startOdomMsg = odomQueue[i];
@@ -353,6 +375,7 @@ public:
         tf::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
 
         // Initial guess used in mapOptimization
+        //获得视觉里程计 作为激光里程计的初始值
         cloudInfo.odomX = startOdomMsg.pose.pose.position.x;
         cloudInfo.odomY = startOdomMsg.pose.pose.position.y;
         cloudInfo.odomZ = startOdomMsg.pose.pose.position.z;
@@ -364,6 +387,7 @@ public:
         cloudInfo.odomAvailable = true;
 
         // get end odometry at the end of the scan
+        //获取帧结束时刻的odom
         odomDeskewFlag = false;
 
         if (odomQueue.back().header.stamp.toSec() < timeScanNext)
@@ -383,7 +407,7 @@ public:
 
         if (int(round(startOdomMsg.pose.covariance[0])) != int(round(endOdomMsg.pose.covariance[0])))
             return;
-
+        //获取相对变换
         Eigen::Affine3f transBegin = pcl::getTransformation(startOdomMsg.pose.pose.position.x, startOdomMsg.pose.pose.position.y, startOdomMsg.pose.pose.position.z, roll, pitch, yaw);
 
         tf::quaternionMsgToTF(endOdomMsg.pose.pose.orientation, orientation);
@@ -397,11 +421,14 @@ public:
 
         odomDeskewFlag = true;
     }
-
+/*
+    1. 找到该点前后的imu相对姿态
+    2. 利用前后帧的姿态插值出该点的姿态
+*/
     void findRotation(double pointTime, float *rotXCur, float *rotYCur, float *rotZCur)
     {
         *rotXCur = 0; *rotYCur = 0; *rotZCur = 0;
-
+        //找到imu相对姿态队列中，大于pointTime的最近点
         int imuPointerFront = 0;
         while (imuPointerFront < imuPointerCur)
         {
@@ -409,7 +436,7 @@ public:
                 break;
             ++imuPointerFront;
         }
-
+        //进行位姿插值
         if (pointTime > imuTime[imuPointerFront] || imuPointerFront == 0)
         {
             *rotXCur = imuRotX[imuPointerFront];
@@ -438,9 +465,13 @@ public:
         // *posYCur = ratio * odomIncreY;
         // *posZCur = ratio * odomIncreZ;
     }
-
+/*  
+    1. 获得起始点和后续点的相对位姿变换
+    2. 将点变换到起始点坐标系下
+*/
     PointType deskewPoint(PointType *point, double relTime)
     {
+        //如果time字段存在，帧间imu相对位姿已获得
         if (deskewFlag == -1 || cloudInfo.imuAvailable == false)
             return *point;
 
@@ -453,7 +484,7 @@ public:
         findPosition(relTime, &posXCur, &posYCur, &posZCur);
 
         if (firstPointFlag == true)
-        {
+        {   //找到起始点的姿态
             transStartInverse = (pcl::getTransformation(posXCur, posYCur, posZCur, rotXCur, rotYCur, rotZCur)).inverse();
             firstPointFlag = false;
         }
@@ -470,7 +501,14 @@ public:
 
         return newPoint;
     }
-
+/*  
+    1.  遍历所有的点，取出ring
+    2.  求解水平角获取columnID
+    3.  计算点的深度值
+    4.  构造rangeMat
+    5.  针对每个点进行去畸变处理
+    6.  将所有的点放入fullcloud
+*/
     void projectPointCloud()
     {
         int cloudSize = (int)laserCloudIn->points.size();
@@ -523,7 +561,11 @@ public:
             fullCloud->points[index] = thisPoint;
         }
     }
-
+/*
+    1. 遍历所有的点，将startRing和endRing赋值
+    2. 赋值cloudInfo.pointColInd pointRange
+    3. 有效深度的点 压进extractedCloud
+*/
     void cloudExtraction()
     {
         int count = 0;
