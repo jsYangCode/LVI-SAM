@@ -233,7 +233,8 @@ public:
         std::lock_guard<std::mutex> lock(mtx);
 
         static double timeLastProcessing = -1;
-        if (timeLaserInfoCur - timeLastProcessing >= mappingProcessInterval) {
+        if (timeLaserInfoCur - timeLastProcessing >= mappingProcessInterval) 
+        {
 
             timeLastProcessing = timeLaserInfoCur;
 
@@ -260,7 +261,7 @@ public:
         std::lock_guard<std::mutex> lock(mtx);
         gpsQueue.push_back(*gpsMsg);
     }
-
+    //转到世界坐标系
     void pointAssociateToMap(PointType const * const pi, PointType * const po)
     {
         po->x = transPointAssociateToMap(0,0) * pi->x + transPointAssociateToMap(0,1) * pi->y + transPointAssociateToMap(0,2) * pi->z + transPointAssociateToMap(0,3);
@@ -268,7 +269,9 @@ public:
         po->z = transPointAssociateToMap(2,0) * pi->x + transPointAssociateToMap(2,1) * pi->y + transPointAssociateToMap(2,2) * pi->z + transPointAssociateToMap(2,3);
         po->intensity = pi->intensity;
     }
-
+/*
+    1.变换点的坐标系
+*/
     pcl::PointCloud<PointType>::Ptr transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn, PointTypePose* transformIn)
     {
         pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
@@ -332,19 +335,6 @@ public:
         thisPose6D.yaw   = transformIn[2];
         return thisPose6D;
     }
-
-    
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -463,22 +453,7 @@ public:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*VIO闭环线程*/
     void loopHandler(const std_msgs::Float64MultiArray::ConstPtr& loopMsg)
     {
         // control loop closure frequency
@@ -493,7 +468,13 @@ public:
 
         performLoopClosure(*loopMsg);
     }
-
+/*  
+    1.根据闭环时间戳，找到最近的激光闭环帧ID
+    2.根据ID找到相应的当前帧和闭环候选帧，并变换到世界系
+    3.根据两帧之间的变换，求出欧氏距离，进行初步位移变换
+    4.icp配准，将当前帧对齐到闭环候选帧
+    5.根据闭环的FitnessScore，设置闭环噪声，添加因子图信息，包括闭环帧ID，相对pose，因子噪声，ID容器
+*/
     void performLoopClosure(const std_msgs::Float64MultiArray& loopMsg)
     {
         pcl::PointCloud<PointTypePose>::Ptr copy_cloudKeyPoses6D(new pcl::PointCloud<PointTypePose>());
@@ -577,7 +558,7 @@ public:
         // add graph factor
         if (icp.getFitnessScore() < historyKeyframeFitnessScore && icp.hasConverged() == true)
         {
-            // get gtsam pose
+            // get gtsam pose   
             gtsam::Pose3 poseFrom = affine3fTogtsamPose3(Eigen::Affine3f(icp.getFinalTransformation()) * pose_diff_t * pose_cur);
             gtsam::Pose3 poseTo   = pclPointTogtsamPose3(copy_cloudKeyPoses6D->points[key_pre]);
             // get noise
@@ -646,7 +627,9 @@ public:
             pubLoopConstraintEdge.publish(markerArray);
         }
     }
-
+/*
+    1.查找当前帧与闭环候选帧，并变换到世界系下
+*/
     void loopFindNearKeyframes(const pcl::PointCloud<PointTypePose>::Ptr& copy_cloudKeyPoses6D,
                                pcl::PointCloud<PointType>::Ptr& nearKeyframes, 
                                const int& key, const int& searchNum)
@@ -672,7 +655,9 @@ public:
         downSizeFilterICP.filter(*cloud_temp);
         *nearKeyframes = *cloud_temp;
     }
-
+/*
+    1.根据VIO的闭环时间戳，查找相应的最近激光帧ID
+*/
     void loopFindKey(const std_msgs::Float64MultiArray& loopMsg, 
                      const pcl::PointCloud<PointTypePose>::Ptr& copy_cloudKeyPoses6D,
                      int& key_cur, int& key_pre)
@@ -723,7 +708,10 @@ public:
             performLoopClosureDetection();
         }
     }
-
+/*
+    1. 找到最新帧的id 时间戳，构建kdtree
+    2. 找到kdtree中的闭环候选帧，取出ID与时间戳
+*/
     void performLoopClosureDetection()
     {
         std::vector<int> pointSearchIndLoop;
@@ -772,32 +760,10 @@ public:
         match_msg.data.push_back(loop_time_pre);
         performLoopClosure(match_msg);
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
-
+/*
+    1. 系统初始化，使用九轴imu的姿态初始化系统姿态，lastImuTransformation
+    2. 分别根据odomAvailable imuAvailable获取姿态相对变换，并计算当前位姿预测值
+*/
     void updateInitialGuess()
     {        
         static Eigen::Affine3f lastImuTransformation;
@@ -819,6 +785,7 @@ public:
         static int odomResetId = 0;
         static bool lastVinsTransAvailable = false;
         static Eigen::Affine3f lastVinsTransformation;
+
         if (cloudInfo.odomAvailable == true && cloudInfo.odomResetId == odomResetId)
         {
             // ROS_INFO("Using VINS initial guess");
@@ -828,7 +795,8 @@ public:
                 lastVinsTransformation = pcl::getTransformation(cloudInfo.odomX,    cloudInfo.odomY,     cloudInfo.odomZ, 
                                                                 cloudInfo.odomRoll, cloudInfo.odomPitch, cloudInfo.odomYaw);
                 lastVinsTransAvailable = true;
-            } else {
+            } else 
+            {
                 // ROS_INFO("Obtaining VINS incremental guess");
                 Eigen::Affine3f transBack = pcl::getTransformation(cloudInfo.odomX,    cloudInfo.odomY,     cloudInfo.odomZ, 
                                                                    cloudInfo.odomRoll, cloudInfo.odomPitch, cloudInfo.odomYaw);
@@ -867,7 +835,11 @@ public:
             return;
         }
     }
-
+/*
+    1. 构建keypose的KDtree，查找当前帧的临近帧
+    2. 再补充一些keypose
+    3. 根据位姿态，查找临近欧氏距离的角点、面点，组建局部地图
+*/
     void extractNearby()
     {
         pcl::PointCloud<PointType>::Ptr surroundingKeyPoses(new pcl::PointCloud<PointType>());
@@ -889,7 +861,7 @@ public:
 
         // also extract some latest key frames in case the robot rotates in one position
         int numPoses = cloudKeyPoses3D->size();
-        for (int i = numPoses-1; i >= 0; --i)
+        for (int i = numPoses-1; i >= 0; --  i)
         {
             if (timeLaserInfoCur - cloudKeyPoses6D->points[i].time < 10.0)
                 surroundingKeyPosesDS->push_back(cloudKeyPoses3D->points[i]);
@@ -912,7 +884,7 @@ public:
         #pragma omp parallel for num_threads(numberOfCores)
         for (int i = 0; i < (int)cloudToExtract->size(); ++i)
         {
-            int thisKeyInd = (int)cloudToExtract->points[i].intensity;
+            int thisKeyInd = (int)cloudToExtract->points[i].intensity;//ID
             if (pointDistance(cloudKeyPoses3D->points[thisKeyInd], cloudKeyPoses3D->back()) > surroundingKeyframeSearchRadius)
                 continue;
             laserCloudCornerSurroundingVec[i]  = *transformPointCloud(cornerCloudKeyFrames[thisKeyInd],  &cloudKeyPoses6D->points[thisKeyInd]);
@@ -982,7 +954,8 @@ public:
             cv::Mat matD1(1, 3, CV_32F, cv::Scalar::all(0));
             cv::Mat matV1(3, 3, CV_32F, cv::Scalar::all(0));
                     
-            if (pointSearchSqDis[4] < 1.0) {
+            if (pointSearchSqDis[4] < 1.0) 
+            {
                 float cx = 0, cy = 0, cz = 0;
                 for (int j = 0; j < 5; j++) {
                     cx += laserCloudCornerFromMapDS->points[pointSearchInd[j]].x;
@@ -1009,7 +982,8 @@ public:
 
                 cv::eigen(matA1, matD1, matV1);
 
-                if (matD1.at<float>(0, 0) > 3 * matD1.at<float>(0, 1)) {
+                if (matD1.at<float>(0, 0) > 3 * matD1.at<float>(0, 1)) 
+                {
 
                     float x0 = pointSel.x;
                     float y0 = pointSel.y;
@@ -1078,7 +1052,8 @@ public:
             matB0.fill(-1);
             matX0.setZero();
 
-            if (pointSearchSqDis[4] < 1.0) {
+            if (pointSearchSqDis[4] < 1.0) 
+            {
                 for (int j = 0; j < 5; j++) {
                     matA0(j, 0) = laserCloudSurfFromMapDS->points[pointSearchInd[j]].x;
                     matA0(j, 1) = laserCloudSurfFromMapDS->points[pointSearchInd[j]].y;
@@ -1096,7 +1071,8 @@ public:
                 pa /= ps; pb /= ps; pc /= ps; pd /= ps;
 
                 bool planeValid = true;
-                for (int j = 0; j < 5; j++) {
+                for (int j = 0; j < 5; j++) 
+                {
                     if (fabs(pa * laserCloudSurfFromMapDS->points[pointSearchInd[j]].x +
                              pb * laserCloudSurfFromMapDS->points[pointSearchInd[j]].y +
                              pc * laserCloudSurfFromMapDS->points[pointSearchInd[j]].z + pd) > 0.2) {
@@ -1362,7 +1338,7 @@ public:
     }
 
     void addOdomFactor()
-    {
+    {   //使用优化后的姿态初始化因子图
         if (cloudKeyPoses3D->points.empty())
         {
             noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Variances((Vector(6) << 1e-2, 1e-2, M_PI*M_PI, 1e8, 1e8, 1e8).finished()); // rad*rad, meter*meter
